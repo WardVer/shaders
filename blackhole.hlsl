@@ -1,30 +1,20 @@
 
 
-float absorption = 10;
-float scatter = 10;
 int steps = 1000;
-float stepsize = 5;
-float smallstepsize = 1;
 int lightsteps = 50;
-float lightstepsize = 5;
-float smalllightstepsize = 1;
+float smalllightstepsize = 2;
 transparancy = 1;
-float3 lightOffset = {0,0,5};
-float3 lightPos = objPos + lightOffset;
-float lightIntensity = 10;
+float3 lightPos[] = {{0,0,diskThickness+1},{0,0,-diskThickness-1}};
 float e = 2.71828;
-float3 rayPos = worldPos;
+float3 rayPos = worldPos - objPos;
 float radius = distance(objPos, worldPos);
 float3 light = 0;
-float3 color = {1.0,0.4,0.2};
-float3 diskcolor = {0.3, 0.3,1};
 float3 rayvector = -normalize(Parameters.CameraVector);
 float g = 0.8;
 float noisescale = 100;
 float lightTransmission;
-
-#define eventhorizon 30
-#define force 20
+#define eventhorizon 15
+#define force 15
 Dir = -Parameters.CameraVector;
 float fresnel = pow(dot(Parameters.WorldNormal, -Dir),2);
 holemask = 0;
@@ -49,10 +39,10 @@ struct functions
         return t * t * (3.0 - (2.0 * t));
     }
 
-    float densityFromTexture(float3 samplePos, Texture2D <float4> disk, SamplerState texSampler, float radius)
+    float densityFromTexture(float3 samplePos, Texture2D <float4> disk, SamplerState texSampler, float radius, float diskThickness)
     {
         float result = Texture2DSample(disk, texSampler, 0.5*(samplePos.xy/radius*0.99+1)).r;
-        result = result * (1-smoothstep(0,result*3+2 , abs(samplePos.z)));
+        result = result * (1-smoothstep(0,result*diskThickness+1 , abs(samplePos.z)));
         return result;
     }
 
@@ -65,7 +55,7 @@ float3 rayDir = normalize(Dir)*stepsize;
 for(int i = 0; i < steps; i++)
 {
     float currentStep = 0;
-    if(abs((rayPos - objPos).z) > 8)
+    if(abs((rayPos).z) > 6)
     {
         currentStep = stepsize;
     }
@@ -73,42 +63,49 @@ for(int i = 0; i < steps; i++)
     {
         currentStep = smallstepsize;
     }
-    float dist = distance(rayPos, objPos);
-    float ditherer = abs(f.random(rayPos.xy)*stepsize*0+1);
-    float density = f.densityFromTexture(rayPos-objPos, disk, diskSampler, radius);
-    float sample_transparancy = pow(e,-currentStep*(absorption+scatter)*density);
+    float dist = length(rayPos);
+    if(dist < eventhorizon) break;
+    
+    float density = f.densityFromTexture(rayPos, disk, diskSampler, radius, diskThickness);    float sample_transparancy = pow(e,-currentStep*(absorption+scatter)*density);
     
     transparancy = transparancy * sample_transparancy;
+    if(density > 0.01)
+    {
+    for(int lightnr = 0; lightnr < 1; lightnr++)
+    {
+        float3 lightrayPos = rayPos;
+        float3 lightrayVector = normalize(lightPos[lightnr]-rayPos);
+        float lightdensity = 0;
+        
+            for(int j = 0; j < lightsteps; j++ )
+            {
+                lightrayPos += lightrayVector*lightstepsize;
+                lightdensity += f.densityFromTexture(lightrayPos, disk, diskSampler, radius, diskThickness);
+                if(length(lightrayPos) < eventhorizon) 
+                {                    break;
+                }
+            }
+    
+            float cos_theta = dot(rayvector,lightrayVector);
+            lightTransmission = pow(e,-lightstepsize*(absorption+scatter)*lightdensity);
+            light = light + scatter * lightTransmission * stepsize * lightIntensity * color * f.phase(g, cos_theta)*transparancy*density+diskcolor*transparancy*density*0.05*scatter;
+    }
+    }
 
-    
-    float3 lightrayPos = rayPos;
-    float3 lightrayVector = normalize(lightPos-rayPos);
-    lightTransmission = 1;
-    
-        for(int j = 0; j < lightsteps; j++ )
-        {
-            lightrayPos += lightrayVector*lightstepsize;
-            float lightdensity = f.densityFromTexture(lightrayPos-objPos, disk, diskSampler, radius);
-            lightTransmission = lightTransmission*pow(e,-lightstepsize*(absorption+scatter)*lightdensity);
-            if(distance(lightrayPos, objPos) < eventhorizon) break;
-        }
-        float cos_theta = dot(rayvector,lightrayVector);
-        light = light + scatter * lightTransmission * stepsize * lightIntensity * color * f.phase(g, cos_theta)*transparancy*density+diskcolor*sample_transparancy*0.02;
-    
     
     
     
     //rayPos = rayPos + rayvector*stepsize*ditherer;
 
     rayDir = normalize(rayDir)*currentStep;
-    rayDir += (-normalize(rayPos-objPos)*force/(pow(dist,2)))*currentStep*currentStep*ditherer*ditherer*fresnel;
-    rayDir = normalize(rayDir)*currentStep*ditherer;
+    rayDir += (-normalize(rayPos)*force/(pow(dist,2)))*currentStep*currentStep*fresnel;
+    rayDir = normalize(rayDir)*currentStep;
     rayPos +=rayDir;
     Dir = rayDir;
 
-
-    if(transparancy < 0.00) break;
-    if(distance(rayPos, objPos) > radius)
+    
+    if(transparancy < 0.01) break;
+    if(length(rayPos) > radius)
     {
         holemask = 1;
         break;
@@ -117,6 +114,9 @@ for(int i = 0; i < steps; i++)
 
 
 return light;
+
+
+
 
 
 
